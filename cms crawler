@@ -1,0 +1,95 @@
+import json
+import time
+import requests, re
+import pymysql
+from lxml import etree
+from multiprocessing import Pool
+
+
+# 每一页的列表中标题、危害级别、时间、及cms名称，分别入到字段：title、level、time、cms，from字段固定为“cnvd”
+def get_one_page(url):
+    headers = {
+        'Cookie': '__jsluid=5faab948917afd342012ffe591abdc3a; bdshare_firstime=1531894718840; JSESSIONID=887F8FC54F5487AF4734ABBC5C9D1BE8',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/65.0.3325.181 Safari/537.36',
+    }
+    reponse = requests.get(url=url, headers=headers)
+    return reponse.content.decode()
+
+
+def parse_one_page(html):
+    tree = etree.HTML(html)
+    tr_lists = tree.xpath('.//tbody/tr')
+    # print(tr_lists)
+    # print(title)
+    # return title
+    levels = tree.xpath('.//td[2]/text()')
+    lists = []
+    for level in levels:
+        lists.append(level.strip())
+    # print(len(lists))
+    level = []
+    for list in range(len(lists)):
+        if list % 2 != 0:
+            level.append(lists[list])
+    # print(level)
+
+
+    items = []
+    for tr in tr_lists:
+        item = {}
+        title = tr.xpath('.//td//a/@title')[0]
+        time = tr.xpath('.//td[6]/text()')[0]
+        level = level[0]
+        item['title'] = title
+        item['time'] = time
+        item['level'] = level
+        item['from'] = 'cnvd'
+        items.append(item)
+    # print(items)
+    return items
+
+    # with open('cms.txt', 'a', encoding='utf-8') as f:
+    #     f.write(json.dumps(items, ensure_ascii=False)+'\n')
+
+
+def write_to_file(content):
+    with open('cms.txt', 'a', encoding='utf-8') as f:
+        f.write(json.dumps(content, ensure_ascii=False) + '\n')
+
+
+def save_to_mysql(data):
+    try:
+        conn = pymysql.Connection(host='localhost', port=3306, user='root',password='', db='spiders', cursorclass=pymysql.cursors.DictCursor)
+        cursor = conn.cursor()
+        insert_sql = """insert into bing(title, time, level) values (%s, %s, %s)"""
+        cursor.execute(insert_sql, (data['title'], data['time'], data['level']))
+        print('save to mysql', data)
+        conn.commit()
+        cursor.close()
+        conn.close()
+    except Exception as e:
+        print('wrong' + str(e))
+
+def main():
+    #迭代器
+    offsets = [i * 20 for i in range(817)]
+    for offset in offsets:
+        url = 'http://www.cnvd.org.cn/flaw/typeResult?typeId=29&max=20&offset=' + str(offset)
+        html = get_one_page(url)
+    # print(html)
+        parse_one_page(html)
+        time.sleep(2)
+        for items in parse_one_page(html):
+        # write_to_file(items)
+            save_to_mysql(items)
+            time.sleep(2)
+
+
+if __name__ == '__main__':
+    # pool = Pool()
+    # pool.map(main, [i for i in range(5)])
+    # pool.close()
+    # pool.join()
+    main()
+
+
